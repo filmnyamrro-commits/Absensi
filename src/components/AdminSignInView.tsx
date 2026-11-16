@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
@@ -57,6 +57,13 @@ export function AdminSignInView({
 
   const [unauthorizedDomainHost, setUnauthorizedDomainHost] = useState<string | null>(null);
   const [copiedHost, setCopiedHost] = useState(false);
+  const alertRef = useRef<HTMLDivElement | null>(null);
+
+  const revealAlert = () => {
+    requestAnimationFrame(() => {
+      alertRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  };
 
   const mapFirebaseAuthError = (err: unknown): string => {
     const code =
@@ -117,6 +124,7 @@ export function AdminSignInView({
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
       setError(mapFirebaseAuthError(err));
+      revealAlert();
     } finally {
       setSigningInGoogle(false);
     }
@@ -126,10 +134,12 @@ export function AdminSignInView({
     e.preventDefault();
     setError(null);
     setInfoMessage(null);
+    setUnauthorizedDomainHost(null);
 
     const trimmedEmail = email.trim();
-    if (!trimmedEmail.includes('@')) {
+    if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
       setError('Please enter a valid Gmail or work email address.');
+      revealAlert();
       return;
     }
 
@@ -141,15 +151,18 @@ export function AdminSignInView({
           `Password reset link sent to ${trimmedEmail}. Please check your inbox.`
         );
         setEmailMode('signin');
+        revealAlert();
       } else if (emailMode === 'signup') {
         if (fullName.trim().length < 2) {
-          setError('Please enter your full name.');
+          setError('Please enter your full name (at least 2 characters).');
           setSubmittingEmail(false);
+          revealAlert();
           return;
         }
         if (password.length < 6) {
-          setError('Password must be at least 6 characters.');
+          setError('Password must be at least 6 characters long.');
           setSubmittingEmail(false);
+          revealAlert();
           return;
         }
         const credential = await createUserWithEmailAndPassword(
@@ -157,21 +170,35 @@ export function AdminSignInView({
           trimmedEmail,
           password
         );
-        await updateProfile(credential.user, { displayName: fullName.trim() });
-        await sendEmailVerification(credential.user);
-        setInfoMessage(
-          `Verification email sent to ${trimmedEmail}. Please verify your email before accessing the dashboard.`
-        );
+        try {
+          await updateProfile(credential.user, { displayName: fullName.trim() });
+        } catch {
+          // Non-fatal if display name update fails
+        }
+        try {
+          await sendEmailVerification(credential.user);
+          setInfoMessage(
+            `Verification email sent to ${trimmedEmail}. Please verify your email before accessing the dashboard.`
+          );
+        } catch (verifyErr) {
+          setInfoMessage(
+            `Account created for ${trimmedEmail}. Use "Resend Verification Email" below if you did not receive the verification link.`
+          );
+          console.warn('Initial verification email failed:', verifyErr);
+        }
+        revealAlert();
       } else {
         if (!password) {
           setError('Please enter your password.');
           setSubmittingEmail(false);
+          revealAlert();
           return;
         }
         await signInWithEmailAndPassword(auth, trimmedEmail, password);
       }
     } catch (err) {
       setError(mapFirebaseAuthError(err));
+      revealAlert();
     } finally {
       setSubmittingEmail(false);
     }
@@ -228,7 +255,11 @@ export function AdminSignInView({
         </p>
 
         {error && (
-          <div className="mb-5 p-3.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 space-y-2.5">
+          <div
+            ref={alertRef}
+            role="alert"
+            className="mb-5 p-3.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 space-y-2.5"
+          >
             <div className="flex items-start gap-2.5">
               <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
               <span>{error}</span>
@@ -372,13 +403,13 @@ export function AdminSignInView({
             <div className="relative flex items-center">
               <div className="flex-1 border-t border-slate-200" />
               <span className="px-3 text-xs font-medium text-slate-400">
-                or use work email &amp; password
+                or use email &amp; password
               </span>
               <div className="flex-1 border-t border-slate-200" />
             </div>
 
             {/* Email & Password Form */}
-            <form onSubmit={handleEmailSubmit} className="space-y-4">
+            <form onSubmit={handleEmailSubmit} noValidate className="space-y-4">
               <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
                 <button
                   type="button"
@@ -472,24 +503,37 @@ export function AdminSignInView({
                 </div>
               )}
 
+              {error && (
+                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+              )}
+
               <button
                 type="submit"
                 disabled={submittingEmail || signingInGoogle}
-                className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-slate-300 bg-white text-slate-800 text-sm font-semibold rounded-lg hover:bg-slate-50 disabled:opacity-60 cursor-pointer"
+                className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 text-white text-sm font-semibold rounded-lg hover:bg-slate-800 disabled:opacity-60 cursor-pointer"
               >
                 {submittingEmail ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  <Mail className="w-4 h-4 text-slate-500" />
+                  <Mail className="w-4 h-4" />
                 )}
                 <span>
                   {emailMode === 'reset'
                     ? 'Send Password Reset Link'
                     : emailMode === 'signup'
-                    ? 'Register with Work Email'
+                    ? 'Create Account with Email'
                     : 'Sign In with Email'}
                 </span>
               </button>
+
+              {emailMode === 'signup' && (
+                <p className="text-[11px] text-slate-500 text-center leading-relaxed">
+                  Works with both Gmail and work email addresses. A verification link will be sent to your inbox.
+                </p>
+              )}
 
               {emailMode === 'reset' && (
                 <button
