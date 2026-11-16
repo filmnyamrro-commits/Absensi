@@ -40,6 +40,46 @@
       },
       "required": ["uid", "email", "displayName", "addedBy", "createdAt"]
     },
+    "AdminEmailInvite": {
+      "title": "AdminEmailInvite",
+      "description": "Authorized Gmail or work email address allowed to access the trainer dashboard.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Sanitized lowercase email key matching ^[a-z0-9_]+$.",
+          "minLength": 3,
+          "maxLength": 200,
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Invited Gmail or work email address.",
+          "minLength": 5,
+          "maxLength": 200
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Trainer or coordinator display name.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "addedBy": {
+          "type": "string",
+          "description": "UID of the admin who invited this email.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when email invite was created."
+        }
+      },
+      "required": ["id", "email", "displayName", "addedBy", "createdAt"]
+    },
     "ForumEvent": {
       "title": "ForumEvent",
       "description": "A school seminar, workshop, training session, or forum event.",
@@ -70,6 +110,20 @@
           "description": "Venue or campus location of the event.",
           "minLength": 2,
           "maxLength": 160
+        },
+        "locationAddress": {
+          "type": "string",
+          "description": "Optional formatted street address from Google Places.",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "locationLat": {
+          "type": "number",
+          "description": "Optional latitude coordinate for the event venue."
+        },
+        "locationLng": {
+          "type": "number",
+          "description": "Optional longitude coordinate for the event venue."
         },
         "description": {
           "type": "string",
@@ -198,7 +252,11 @@
   "firestore": {
     "/admins/{adminId}": {
       "schema": { "$ref": "#/entities/Admin" },
-      "description": "Authorized trainer/admin accounts."
+      "description": "Authorized trainer/admin accounts by UID."
+    },
+    "/adminEmails/{emailKey}": {
+      "schema": { "$ref": "#/entities/AdminEmailInvite" },
+      "description": "Authorized trainer/admin Gmail and work email addresses."
     },
     "/events/{eventId}": {
       "schema": { "$ref": "#/entities/ForumEvent" },

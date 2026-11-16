@@ -17,6 +17,7 @@ import {
 import { deleteObject, getBlob, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, handleFirestoreError, OperationType, storage } from '../firebase';
 import {
+  AdminEmailInvite,
   AdminUser,
   BOOTSTRAPPED_ADMIN_EMAIL,
   EventStatus,
@@ -34,6 +35,9 @@ export interface EventInput {
   title: string;
   eventDate: string;
   location: string;
+  locationAddress?: string;
+  locationLat?: number;
+  locationLng?: number;
   description: string;
   status: EventStatus;
 }
@@ -53,22 +57,38 @@ export interface RegistrationSubmitResult {
   participantNumber: string;
 }
 
+export function emailToInviteKey(email: string): string {
+  return email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
+
 export async function verifyUserIsAdmin(user: User | null): Promise<boolean> {
-  if (!user || !user.emailVerified) return false;
-  if (user.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()) {
+  if (!user || !user.emailVerified || !user.email) return false;
+  if (user.email.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()) {
     return true;
   }
-  const path = `admins/${user.uid}`;
+
+  // Check UID allowlist
   try {
-    const snap = await getDoc(doc(db, 'admins', user.uid));
-    return snap.exists();
+    const uidSnap = await getDoc(doc(db, 'admins', user.uid));
+    if (uidSnap.exists()) return true;
   } catch (error) {
-    // Permission denied means user is not an admin; other errors are logged via handleFirestoreError
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    if (!message.includes('permission') && !message.includes('insufficient')) {
+      handleFirestoreError(error, OperationType.GET, `admins/${user.uid}`);
+    }
+  }
+
+  // Check Gmail / work email invite allowlist
+  const emailKey = emailToInviteKey(user.email);
+  try {
+    const inviteSnap = await getDoc(doc(db, 'adminEmails', emailKey));
+    return inviteSnap.exists();
+  } catch (error) {
     const message = error instanceof Error ? error.message.toLowerCase() : '';
     if (message.includes('permission') || message.includes('insufficient')) {
       return false;
     }
-    handleFirestoreError(error, OperationType.GET, path);
+    handleFirestoreError(error, OperationType.GET, `adminEmails/${emailKey}`);
   }
 }
 
@@ -126,6 +146,23 @@ export async function fetchAllEvents(): Promise<ForumEvent[]> {
   }
 }
 
+function buildOptionalLocationPayload(input: EventInput) {
+  const extra: Record<string, unknown> = {};
+  if (input.locationAddress && input.locationAddress.trim().length > 0) {
+    extra.locationAddress = input.locationAddress.trim().slice(0, 300);
+  }
+  if (
+    typeof input.locationLat === 'number' &&
+    Number.isFinite(input.locationLat) &&
+    typeof input.locationLng === 'number' &&
+    Number.isFinite(input.locationLng)
+  ) {
+    extra.locationLat = input.locationLat;
+    extra.locationLng = input.locationLng;
+  }
+  return extra;
+}
+
 export async function createForumEvent(input: EventInput, adminUid: string): Promise<string> {
   const cleanTitle = input.title.trim().slice(0, 160);
   const cleanLocation = input.location.trim().slice(0, 160);
@@ -139,6 +176,7 @@ export async function createForumEvent(input: EventInput, adminUid: string): Pro
       title: cleanTitle,
       eventDate: input.eventDate,
       location: cleanLocation,
+      ...buildOptionalLocationPayload(input),
       description: cleanDesc,
       status: input.status,
       createdBy: adminUid,
@@ -158,6 +196,7 @@ export async function updateForumEvent(eventId: string, input: EventInput): Prom
       title: input.title.trim().slice(0, 160),
       eventDate: input.eventDate,
       location: input.location.trim().slice(0, 160),
+      ...buildOptionalLocationPayload(input),
       description: input.description.trim().slice(0, 1000),
       status: input.status,
       updatedAt: serverTimestamp(),
@@ -170,7 +209,6 @@ export async function updateForumEvent(eventId: string, input: EventInput): Prom
 export async function deleteForumEvent(eventId: string): Promise<void> {
   const path = `events/${eventId}`;
   try {
-    // Delete child registrations and their photos first if any
     const regsSnap = await getDocs(collection(db, 'events', eventId, 'registrations'));
     for (const regDoc of regsSnap.docs) {
       const reg = regDoc.data() as ParticipantRegistration;
@@ -220,7 +258,6 @@ export async function submitParticipantRegistration(
     input.schoolDistrict
   );
 
-  // Client-side duplicate check for immediate user feedback before uploading photo
   const localKey = `sgm_attendance_${eventId}_${registrationId}`;
   try {
     if (localStorage.getItem(localKey)) {
@@ -234,7 +271,6 @@ export async function submitParticipantRegistration(
 
   const photoStoragePath = `events/${eventId}/registrations/${registrationId}/photo.jpg`;
 
-  // Step 1: Upload participant photo to Firebase Storage
   try {
     const photoRef = ref(storage, photoStoragePath);
     await uploadBytes(photoRef, input.photoBlob, {
@@ -271,7 +307,6 @@ export async function submitParticipantRegistration(
     );
   }
 
-  // Step 2: Write attendance record to Cloud Firestore
   const participantNumber = generateParticipantNumber();
   const docPath = `events/${eventId}/registrations/${registrationId}`;
 
@@ -299,7 +334,6 @@ export async function submitParticipantRegistration(
   } catch (dbError: unknown) {
     const rawMessage = dbError instanceof Error ? dbError.message.toLowerCase() : '';
     if (rawMessage.includes('already') || rawMessage.includes('permission') || rawMessage.includes('insufficient')) {
-      // Check if event was closed right before submit, vs duplicate record
       const latestEvent = await fetchEventById(eventId).catch(() => null);
       if (latestEvent && latestEvent.status === 'Closed') {
         throw new Error('Registration for this event has just been closed by the administrator.');
@@ -414,7 +448,6 @@ export async function downloadParticipantPhotoFile(
     const blob = await getBlob(ref(storage, reg.photoStoragePath));
     triggerBlobDownload(blob, filename);
   } catch {
-    // Fallback via download URL fetch if getBlob CORS is restricted
     const url = await getDownloadURL(ref(storage, reg.photoStoragePath));
     const response = await fetch(url);
     if (!response.ok) {
@@ -460,6 +493,46 @@ export async function removeAdminUser(uid: string): Promise<void> {
   const path = `admins/${uid}`;
   try {
     await deleteDoc(doc(db, 'admins', uid));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function fetchAdminEmailInvites(): Promise<AdminEmailInvite[]> {
+  const path = 'adminEmails';
+  try {
+    const snap = await getDocs(collection(db, 'adminEmails'));
+    return snap.docs.map((d) => d.data() as AdminEmailInvite);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+export async function addAdminEmailInvite(
+  email: string,
+  displayName: string,
+  addedByUid: string
+): Promise<void> {
+  const normalizedEmail = email.trim().toLowerCase().slice(0, 200);
+  const id = emailToInviteKey(normalizedEmail);
+  const path = `adminEmails/${id}`;
+  try {
+    await setDoc(doc(db, 'adminEmails', id), {
+      id,
+      email: normalizedEmail,
+      displayName: displayName.trim().slice(0, 120),
+      addedBy: addedByUid,
+      createdAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function removeAdminEmailInvite(id: string): Promise<void> {
+  const path = `adminEmails/${id}`;
+  try {
+    await deleteDoc(doc(db, 'adminEmails', id));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }

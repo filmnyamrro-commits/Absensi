@@ -28,6 +28,9 @@ export interface ForumEvent {
   title: string;
   eventDate: string;
   location: string;
+  locationAddress?: string;
+  locationLat?: number;
+  locationLng?: number;
   description: string;
   status: EventStatus;
   createdBy: string;
@@ -50,6 +53,14 @@ export interface ParticipantRegistration {
 
 export interface AdminUser {
   uid: string;
+  email: string;
+  displayName: string;
+  addedBy: string;
+  createdAt: Timestamp | null;
+}
+
+export interface AdminEmailInvite {
+  id: string;
   email: string;
   displayName: string;
   addedBy: string;

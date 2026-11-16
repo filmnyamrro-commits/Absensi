@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { Lock, ShieldCheck } from 'lucide-react';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -25,6 +25,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthorizedAdmin, setIsAuthorizedAdmin] = useState(false);
+  const [mapsQuotaExceeded, setMapsQuotaExceeded] = useState(false);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -35,30 +36,45 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
-      if (user) {
-        try {
-          const allowed = await verifyUserIsAdmin(user);
-          setIsAuthorizedAdmin(allowed);
-        } catch {
-          setIsAuthorizedAdmin(false);
-        }
-      } else {
+    const handleQuotaExceeded = () => setMapsQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', handleQuotaExceeded);
+    return () => window.removeEventListener('gmp-quota-exceeded', handleQuotaExceeded);
+  }, []);
+
+  const checkAdminStatus = useCallback(async (user: User | null) => {
+    setCurrentUser(user);
+    if (user) {
+      try {
+        const allowed = await verifyUserIsAdmin(user);
+        setIsAuthorizedAdmin(allowed);
+      } catch {
         setIsAuthorizedAdmin(false);
       }
-      setAuthChecked(true);
+    } else {
+      setIsAuthorizedAdmin(false);
+    }
+    setAuthChecked(true);
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      void checkAdminStatus(user);
     });
     return () => unsubscribe();
-  }, []);
+  }, [checkAdminStatus]);
+
+  const handleAuthRefresh = async () => {
+    if (auth.currentUser) {
+      await auth.currentUser.reload();
+      await checkAdminStatus(auth.currentUser);
+    }
+  };
 
   const navigateToRegistration = (eventId?: string) => {
     const url = new URL(window.location.href);
     if (eventId) {
       url.searchParams.set('event', eventId);
       setRequestedEventId(eventId);
-    } else if (eventId === undefined) {
-      // Keep current event param if none explicitly cleared
     }
     window.history.pushState({}, '', url.toString());
     setRoute('register');
@@ -74,6 +90,23 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+      {mapsQuotaExceeded && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
+          <span>
+            Google Maps Platform quota reached. If you are the app owner, visit{' '}
+            <a
+              href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline font-semibold text-amber-950 hover:text-amber-800"
+            >
+              maps developer site
+            </a>{' '}
+            for instructions to update your account.
+          </span>
+        </div>
+      )}
+
       {/* 3-Zone Top Bar */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-8">
@@ -167,6 +200,7 @@ export default function App() {
             currentUser={currentUser}
             authChecked={authChecked}
             isAuthorizedAdmin={isAuthorizedAdmin}
+            onAuthRefresh={handleAuthRefresh}
             onBackToRegistration={() => setRoute('register')}
           />
         )}

@@ -23,6 +23,7 @@ import {
   updateForumEvent,
 } from '../../services/attendanceService';
 import { EventStatus, ForumEvent } from '../../types';
+import { EventLocationPicker } from '../maps/EventVenueMap';
 
 interface EventManagementViewProps {
   events: ForumEvent[];
@@ -46,6 +47,9 @@ export function EventManagementView({
     new Date().toISOString().slice(0, 10)
   );
   const [location, setLocation] = useState('');
+  const [locationAddress, setLocationAddress] = useState('');
+  const [locationLat, setLocationLat] = useState<number | undefined>(undefined);
+  const [locationLng, setLocationLng] = useState<number | undefined>(undefined);
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState<EventStatus>('Open');
   const [saving, setSaving] = useState(false);
@@ -69,6 +73,9 @@ export function EventManagementView({
     setTitle('');
     setEventDate(new Date().toISOString().slice(0, 10));
     setLocation('');
+    setLocationAddress('');
+    setLocationLat(undefined);
+    setLocationLng(undefined);
     setDescription('');
     setStatus('Open');
     setFormError(null);
@@ -80,6 +87,9 @@ export function EventManagementView({
     setTitle(evt.title);
     setEventDate(evt.eventDate);
     setLocation(evt.location);
+    setLocationAddress(evt.locationAddress || '');
+    setLocationLat(evt.locationLat);
+    setLocationLng(evt.locationLng);
     setDescription(evt.description);
     setStatus(evt.status);
     setFormError(null);
@@ -110,6 +120,9 @@ export function EventManagementView({
           title,
           eventDate,
           location,
+          locationAddress,
+          locationLat,
+          locationLng,
           description,
           status,
         });
@@ -119,6 +132,9 @@ export function EventManagementView({
             title,
             eventDate,
             location,
+            locationAddress,
+            locationLat,
+            locationLng,
             description,
             status,
           },
@@ -142,6 +158,9 @@ export function EventManagementView({
         title: evt.title,
         eventDate: evt.eventDate,
         location: evt.location,
+        locationAddress: evt.locationAddress,
+        locationLat: evt.locationLat,
+        locationLng: evt.locationLng,
         description: evt.description,
         status: nextStatus,
       });
@@ -296,9 +315,12 @@ export function EventManagementView({
                         {evt.title}
                       </h3>
 
-                      <div className="flex items-center gap-1.5 text-xs text-slate-600">
-                        <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span>{evt.location}</span>
+                      <div className="flex items-start gap-1.5 text-xs text-slate-600">
+                        <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                        <span>
+                          {evt.location}
+                          {evt.locationAddress ? ` — ${evt.locationAddress}` : ''}
+                        </span>
                       </div>
 
                       {evt.description && (
@@ -435,7 +457,7 @@ export function EventManagementView({
           role="dialog"
           aria-modal="true"
         >
-          <div className="bg-white border border-slate-200 rounded-xl w-full max-w-lg overflow-hidden my-auto">
+          <div className="bg-white border border-slate-200 rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto my-auto">
             <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-900">
                 {editingEvent ? 'Edit Event' : 'Create Forum Event'}
@@ -500,20 +522,27 @@ export function EventManagementView({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Event Location <span className="text-red-600">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  maxLength={160}
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  placeholder="e.g. Main Auditorium, Cibubur Campus"
-                  className="w-full min-h-[42px] px-3.5 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
-                />
-              </div>
+              <EventLocationPicker
+                locationValue={location}
+                locationAddress={locationAddress}
+                lat={locationLat}
+                lng={locationLng}
+                onLocationTextChange={setLocation}
+                onVenueSelected={(selection) => {
+                  if (!selection) {
+                    setLocationAddress('');
+                    setLocationLat(undefined);
+                    setLocationLng(undefined);
+                    return;
+                  }
+                  if (!location.trim()) {
+                    setLocation(selection.locationName);
+                  }
+                  setLocationAddress(selection.locationAddress);
+                  setLocationLat(selection.lat);
+                  setLocationLng(selection.lng);
+                }}
+              />
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">

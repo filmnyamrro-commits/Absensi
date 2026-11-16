@@ -13,12 +13,14 @@ service firebase.storage {
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
 
-      // Only verified administrators can view, download, or delete participant photos
+      // Only verified administrators (Google/Gmail or work email) can view or delete photos
       allow read, delete: if request.auth != null
+        && request.auth.token.email is string
         && request.auth.token.email_verified == true
         && (
-          request.auth.token.email == 'rohantmr.lover@gmail.com'
+          request.auth.token.email.lower() == 'rohantmr.lover@gmail.com'
           || firestore.exists(/databases/ai-studio-abd2bc52-0e37-4ce9-a84f-fdb83c322d7b/documents/admins/$(request.auth.uid))
+          || firestore.exists(/databases/ai-studio-abd2bc52-0e37-4ce9-a84f-fdb83c322d7b/documents/adminEmails/$(request.auth.token.email.lower().replace('[^a-z0-9]', '_')))
         );
     }
   }

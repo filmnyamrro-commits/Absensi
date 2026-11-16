@@ -27,6 +27,7 @@ import {
   SchoolDistrict,
 } from '../types';
 import { captureVideoFrame, compressImageFile } from '../utils/imageUtils';
+import { EventVenueMapCard } from './maps/EventVenueMap';
 
 interface RegistrationPageProps {
   requestedEventId: string | null;
@@ -629,6 +630,16 @@ export function RegistrationPage({
             {selectedEvent.description}
           </p>
         )}
+        {typeof selectedEvent.locationLat === 'number' &&
+          typeof selectedEvent.locationLng === 'number' && (
+            <EventVenueMapCard
+              title={selectedEvent.title}
+              location={selectedEvent.location}
+              locationAddress={selectedEvent.locationAddress}
+              lat={selectedEvent.locationLat}
+              lng={selectedEvent.locationLng}
+            />
+          )}
       </div>
 
       {/* Registration Form */}

@@ -9,7 +9,7 @@ service cloud.firestore {
 
     // --- Helper Functions ---
     function isValidId(id) {
-      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() >= 1 && id.size() <= 200 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function incoming() {
@@ -25,15 +25,25 @@ service cloud.firestore {
     }
 
     function isVerifiedUser() {
-      return isSignedIn() && request.auth.token.email_verified == true;
+      return isSignedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email_verified == true;
+    }
+
+    function emailToKey(email) {
+      return email.lower().replace('[^a-z0-9]', '_');
     }
 
     function isBootstrappedAdmin() {
-      return isVerifiedUser() && request.auth.token.email == 'rohantmr.lover@gmail.com';
+      return isVerifiedUser() && request.auth.token.email.lower() == 'rohantmr.lover@gmail.com';
     }
 
     function isAdmin() {
-      return isBootstrappedAdmin() || (isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+      return isBootstrappedAdmin()
+        || (isVerifiedUser() && (
+          exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+          || exists(/databases/$(database)/documents/adminEmails/$(emailToKey(request.auth.token.email)))
+        ));
     }
 
     function isValidAdmin(data, adminId) {
@@ -46,13 +56,26 @@ service cloud.firestore {
         && data.createdAt == request.time;
     }
 
+    function isValidAdminEmailInvite(data, emailKey) {
+      return data.keys().hasAll(['id', 'email', 'displayName', 'addedBy', 'createdAt'])
+        && data.keys().hasOnly(['id', 'email', 'displayName', 'addedBy', 'createdAt'])
+        && data.id is string && data.id.size() >= 3 && data.id.size() <= 200 && data.id == emailKey && data.id.matches('^[a-z0-9_]+$')
+        && data.email is string && data.email.size() >= 5 && data.email.size() <= 200 && emailToKey(data.email) == emailKey
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.addedBy is string && data.addedBy.size() >= 1 && data.addedBy.size() <= 128 && data.addedBy == request.auth.uid && data.addedBy.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.createdAt == request.time;
+    }
+
     function isValidEventFields(data, eventId) {
       return data.keys().hasAll(['id', 'title', 'eventDate', 'location', 'description', 'status', 'createdBy', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'title', 'eventDate', 'location', 'description', 'status', 'createdBy', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'title', 'eventDate', 'location', 'locationAddress', 'locationLat', 'locationLng', 'description', 'status', 'createdBy', 'createdAt', 'updatedAt'])
         && data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id == eventId && data.id.matches('^[a-zA-Z0-9_\\-]+$')
         && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
         && data.eventDate is string && data.eventDate.size() == 10 && data.eventDate.matches('^\\d{4}-\\d{2}-\\d{2}$')
         && data.location is string && data.location.size() >= 2 && data.location.size() <= 160
+        && (!('locationAddress' in data) || (data.locationAddress is string && data.locationAddress.size() <= 300))
+        && (!('locationLat' in data) || (data.locationLat is number && data.locationLat >= -90 && data.locationLat <= 90))
+        && (!('locationLng' in data) || (data.locationLng is number && data.locationLng >= -180 && data.locationLng <= 180))
         && data.description is string && data.description.size() <= 1000
         && data.status in ['Open', 'Closed']
         && data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 && data.createdBy.matches('^[a-zA-Z0-9_\\-]+$')
@@ -123,6 +146,14 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(adminId) && adminId != request.auth.uid;
     }
 
+    match /adminEmails/{emailKey} {
+      allow get: if isValidId(emailKey) && (isAdmin() || (isVerifiedUser() && emailToKey(request.auth.token.email) == emailKey));
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidId(emailKey) && isValidAdminEmailInvite(incoming(), emailKey);
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(emailKey);
+    }
+
     match /events/{eventId} {
       allow get: if isValidId(eventId);
       allow list: if resource.data.status == 'Open' || isAdmin();
@@ -134,7 +165,7 @@ service cloud.firestore {
         && incoming().createdBy == existing().createdBy
         && incoming().createdAt == existing().createdAt
         && incoming().diff(existing()).affectedKeys().hasOnly([
-          'title', 'eventDate', 'location', 'description', 'status', 'updatedAt'
+          'title', 'eventDate', 'location', 'locationAddress', 'locationLat', 'locationLng', 'description', 'status', 'updatedAt'
         ]);
       allow delete: if isAdmin() && isValidId(eventId);
 
