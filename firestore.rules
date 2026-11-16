@@ -1,0 +1,166 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny all reads and writes by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Functions ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'rohantmr.lover@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isValidAdmin(data, adminId) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'addedBy', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'addedBy', 'createdAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == adminId && data.uid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.email is string && data.email.size() >= 5 && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.addedBy is string && data.addedBy.size() >= 1 && data.addedBy.size() <= 128 && data.addedBy == request.auth.uid && data.addedBy.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.createdAt == request.time;
+    }
+
+    function isValidEventFields(data, eventId) {
+      return data.keys().hasAll(['id', 'title', 'eventDate', 'location', 'description', 'status', 'createdBy', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'title', 'eventDate', 'location', 'description', 'status', 'createdBy', 'createdAt', 'updatedAt'])
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id == eventId && data.id.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
+        && data.eventDate is string && data.eventDate.size() == 10 && data.eventDate.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.location is string && data.location.size() >= 2 && data.location.size() <= 160
+        && data.description is string && data.description.size() <= 1000
+        && data.status in ['Open', 'Closed']
+        && data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 && data.createdBy.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidEventCreate(data, eventId) {
+      return isValidEventFields(data, eventId)
+        && data.createdBy == request.auth.uid
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    function isValidEventUpdate(data, eventId) {
+      return isValidEventFields(data, eventId)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidDistrict(district) {
+      return district in [
+        'Sekolah Global Mandiri Cibubur',
+        'Sekolah Global Mandiri Jakarta',
+        'Sekolah Global Mandiri Palembang'
+      ];
+    }
+
+    function isValidRegistrationFields(data, eventId, registrationId) {
+      return data.keys().hasAll([
+          'id', 'eventId', 'participantNumber', 'fullName', 'className',
+          'level', 'schoolDistrict', 'photoStoragePath', 'consentAccepted', 'registeredAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'eventId', 'participantNumber', 'fullName', 'className',
+          'level', 'schoolDistrict', 'photoStoragePath', 'consentAccepted', 'registeredAt'
+        ])
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id == registrationId && data.id.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.eventId is string && data.eventId.size() >= 1 && data.eventId.size() <= 128 && data.eventId == eventId && data.eventId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.participantNumber is string && data.participantNumber.size() >= 3 && data.participantNumber.size() <= 32 && data.participantNumber.matches('^[a-zA-Z0-9\\-]+$')
+        && data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120
+        && data.className is string && data.className.size() >= 1 && data.className.size() <= 60
+        && data.level is string && data.level.size() >= 2 && data.level.size() <= 60
+        && isValidDistrict(data.schoolDistrict)
+        && data.photoStoragePath is string
+        && data.photoStoragePath.size() >= 10
+        && data.photoStoragePath.size() <= 512
+        && data.photoStoragePath == ('events/' + eventId + '/registrations/' + registrationId + '/photo.jpg')
+        && data.consentAccepted is bool && data.consentAccepted == true
+        && data.registeredAt is timestamp;
+    }
+
+    function isValidRegistrationCreate(data, eventId, registrationId) {
+      return isValidRegistrationFields(data, eventId, registrationId)
+        && data.registeredAt == request.time;
+    }
+
+    function isValidRegistrationUpdate(data, eventId, registrationId) {
+      return isValidRegistrationFields(data, eventId, registrationId);
+    }
+
+    // --- Collection Rules ---
+
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && (isAdmin() || (isVerifiedUser() && request.auth.uid == adminId));
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidId(adminId) && isValidAdmin(incoming(), adminId);
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(adminId) && adminId != request.auth.uid;
+    }
+
+    match /events/{eventId} {
+      allow get: if isValidId(eventId);
+      allow list: if resource.data.status == 'Open' || isAdmin();
+      allow create: if isAdmin() && isValidId(eventId) && isValidEventCreate(incoming(), eventId);
+      allow update: if isAdmin()
+        && isValidId(eventId)
+        && isValidEventUpdate(incoming(), eventId)
+        && incoming().id == existing().id
+        && incoming().createdBy == existing().createdBy
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'eventDate', 'location', 'description', 'status', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(eventId);
+
+      match /registrations/{registrationId} {
+        allow get: if isAdmin() && isValidId(eventId) && isValidId(registrationId);
+        allow list: if isAdmin();
+        allow create: if isValidId(eventId)
+          && isValidId(registrationId)
+          && isValidRegistrationCreate(incoming(), eventId, registrationId)
+          && exists(/databases/$(database)/documents/events/$(eventId))
+          && get(/databases/$(database)/documents/events/$(eventId)).data.status == 'Open';
+        allow update: if isAdmin()
+          && isValidId(eventId)
+          && isValidId(registrationId)
+          && isValidRegistrationUpdate(incoming(), eventId, registrationId)
+          && incoming().id == existing().id
+          && incoming().eventId == existing().eventId
+          && incoming().participantNumber == existing().participantNumber
+          && incoming().photoStoragePath == existing().photoStoragePath
+          && incoming().consentAccepted == existing().consentAccepted
+          && incoming().registeredAt == existing().registeredAt
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'fullName', 'className', 'level', 'schoolDistrict'
+          ]);
+        allow delete: if isAdmin() && isValidId(eventId) && isValidId(registrationId);
+      }
+    }
+  }
+}

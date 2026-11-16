@@ -1,0 +1,25 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Deny all access by default
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Participant attendance photos scoped per event and registration ID
+    match /events/{eventId}/registrations/{registrationId}/photo.jpg {
+      // Allow participants to upload a compressed image (< 5 MB) during registration
+      allow create: if request.resource != null
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+
+      // Only verified administrators can view, download, or delete participant photos
+      allow read, delete: if request.auth != null
+        && request.auth.token.email_verified == true
+        && (
+          request.auth.token.email == 'rohantmr.lover@gmail.com'
+          || firestore.exists(/databases/ai-studio-abd2bc52-0e37-4ce9-a84f-fdb83c322d7b/documents/admins/$(request.auth.uid))
+        );
+    }
+  }
+}

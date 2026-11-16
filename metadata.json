@@ -1,0 +1,6 @@
+{
+  "name": "SGM Forum Attendance",
+  "description": "Forum attendance, participant registration, photo verification, and event administration for Sekolah Global Mandiri.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
